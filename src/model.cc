@@ -17,6 +17,7 @@
 #include <opennfs/opengl.h>
 #include <math.h>
 #include <limits>
+#include <algorithm>
 #include <opennfs/billboard.h>
 
 #ifndef M_PI
@@ -399,5 +400,119 @@ void Model::drawModel()
 
         assert(_vertices.size() == _normals.size());
         assert(_vertices.size() / 3 == _texcoords.size() / 2);
+    }
+
+    void Model::build_ground_grid() {
+        _ground_cell = 20.0f;
+        _ground_cells.clear();
+        _ground_ready = true;
+
+        size_t ntri = _vertices.size() / 9;
+        if (ntri == 0) {
+            _ground_nx = _ground_nz = 0;
+            return;
+        }
+
+        float min_x = std::numeric_limits<float>::max();
+        float min_z = std::numeric_limits<float>::max();
+        float max_x = -std::numeric_limits<float>::max();
+        float max_z = -std::numeric_limits<float>::max();
+        for (size_t i = 0; i + 2 < _vertices.size(); i += 3) {
+            float x = _vertices[i];
+            float z = _vertices[i + 2];
+            if (x < min_x)
+                min_x = x;
+            if (x > max_x)
+                max_x = x;
+            if (z < min_z)
+                min_z = z;
+            if (z > max_z)
+                max_z = z;
+        }
+
+        _ground_x0 = min_x;
+        _ground_z0 = min_z;
+        _ground_nx = (int)((max_x - min_x) / _ground_cell) + 1;
+        _ground_nz = (int)((max_z - min_z) / _ground_cell) + 1;
+        _ground_cells.resize((size_t)_ground_nx * _ground_nz);
+
+        for (size_t t = 0; t < ntri; t++) {
+            const float* v = &_vertices[9 * t];
+            float tx0 = std::min(v[0], std::min(v[3], v[6]));
+            float tx1 = std::max(v[0], std::max(v[3], v[6]));
+            float tz0 = std::min(v[2], std::min(v[5], v[8]));
+            float tz1 = std::max(v[2], std::max(v[5], v[8]));
+            int cx0 = (int)floorf((tx0 - _ground_x0) / _ground_cell);
+            int cx1 = (int)floorf((tx1 - _ground_x0) / _ground_cell);
+            int cz0 = (int)floorf((tz0 - _ground_z0) / _ground_cell);
+            int cz1 = (int)floorf((tz1 - _ground_z0) / _ground_cell);
+            cx0 = std::max(cx0, 0);
+            cz0 = std::max(cz0, 0);
+            cx1 = std::min(cx1, _ground_nx - 1);
+            cz1 = std::min(cz1, _ground_nz - 1);
+            for (int cz = cz0; cz <= cz1; cz++) {
+                for (int cx = cx0; cx <= cx1; cx++) {
+                    _ground_cells[(size_t)cz * _ground_nx + cx].push_back((int)t);
+                }
+            }
+        }
+    }
+
+    bool Model::ground_height(float wx, float wz, float ref_y, float* out_y,
+        float step_up) {
+        if (!_ground_ready) {
+            build_ground_grid();
+        }
+
+        float ox, oy, oz;
+        getInstancePosition(0, &ox, &oy, &oz);
+        float lx = wx - ox;
+        float lz = wz - oz;
+
+        int cx = (int)floorf((lx - _ground_x0) / _ground_cell);
+        int cz = (int)floorf((lz - _ground_z0) / _ground_cell);
+        if (cx < 0 || cz < 0 || cx >= _ground_nx || cz >= _ground_nz) {
+            return false;
+        }
+
+        const std::vector<int>& cell = _ground_cells[(size_t)cz * _ground_nx + cx];
+        const float limit = ref_y + step_up;
+        const float eps = -1e-4f;
+
+        bool have_reachable = false, have_any = false;
+        float best_reachable = 0.0f, lowest = 0.0f;
+
+        for (size_t i = 0; i < cell.size(); i++) {
+            const float* a = &_vertices[9 * (size_t)cell[i]];
+            const float* b = a + 3;
+            const float* c = a + 6;
+
+            float d = (b[2] - c[2]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[2] - c[2]);
+            if (fabsf(d) < 1e-12f) {
+                continue; // vertical or degenerate triangle
+            }
+            float l1 = ((b[2] - c[2]) * (lx - c[0]) + (c[0] - b[0]) * (lz - c[2])) / d;
+            float l2 = ((c[2] - a[2]) * (lx - c[0]) + (a[0] - c[0]) * (lz - c[2])) / d;
+            float l3 = 1.0f - l1 - l2;
+            if (l1 < eps || l2 < eps || l3 < eps) {
+                continue;
+            }
+
+            float y = l1 * a[1] + l2 * b[1] + l3 * c[1] + oy;
+            if (!have_any || y < lowest) {
+                lowest = y;
+            }
+            have_any = true;
+            if (y <= limit && (!have_reachable || y > best_reachable)) {
+                best_reachable = y;
+                have_reachable = true;
+            }
+        }
+
+        if (!have_any) {
+            return false;
+        }
+        *out_y = have_reachable ? best_reachable : lowest;
+        return true;
     }
 };

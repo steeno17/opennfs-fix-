@@ -37,6 +37,13 @@ private:
         bool light_enabled;
 	float scale;
 
+	// Ground-height lookup grid (built lazily by ground_height()).
+	void build_ground_grid();
+	bool _ground_ready;
+	float _ground_x0, _ground_z0, _ground_cell;
+	int _ground_nx, _ground_nz;
+	std::vector<std::vector<int> > _ground_cells;
+
 
 
 public:
@@ -47,6 +54,7 @@ public:
 		load();
 		addInstances(instanceno);
                 light_enabled = true;
+		_ground_ready = false;
 	}
     
 	void compute_distance(float x, float y, float z);
@@ -63,6 +71,13 @@ public:
 		float start_color[2],  /* start color */
 		float end_color[3]   /* end color */
 	);
+	// Treat the model as terrain: find the surface height under world
+	// position (wx, wz). Instance 0's translation is applied (rotation is
+	// not). When the mesh has several layers (bridges, tunnels) the highest
+	// surface not more than `step_up` above ref_y wins. Returns false when
+	// (wx, wz) is outside the mesh.
+	bool ground_height(float wx, float wz, float ref_y, float *out_y,
+			float step_up = 2.0f);
 	void draw();
 	void draw_towards(float eye_x, float eye_y, float eye_z);
 	int getId();
