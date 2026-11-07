@@ -4,7 +4,7 @@ screen.height=1080
 screen.fullscreen=true
 screen.depth=16
 screen.title=Open Need for Speed (c) 2014 MIKC
-screen.target_fps=60
+screen.target_fps=240
 screen.field_of_view=60.0
 
 texture.anisotropic=true
